@@ -1,0 +1,361 @@
+<html>
+    <head>
+        <title>Sample Hierarchical Modelling with lighting, texture and shadow</title>
+        <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+
+        <script type="text/javascript" src="js/glMatrix-0.9.5.min.js"></script>
+        <script type="text/javascript" src="js/webgl-utils.js"></script>
+
+        <script id="vs-shadowmap" type="x-shader/x-vertex">#version 300 es
+ 
+			uniform mat4 uMVMatrix;
+			uniform mat4 uPMatrix;
+			
+			in vec3 aVertexPosition;
+			
+			out vec4 vPosition;
+
+			void main() {
+				vPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
+                gl_Position = uPMatrix * vPosition;
+			}
+		</script>
+
+		<script id="fs-shadowmap" type="x-shader/x-fragment">#version 300 es
+ 
+			precision mediump int;
+			precision mediump float;
+			
+			in vec4 vPosition;
+			out vec4 fragColor;
+
+			uniform vec3 uPointLightingLocation;
+			uniform float uFarPlane;
+
+			void main() {
+			  // get distance between fragment and light source
+			  float lightDistance = length(vPosition.xyz - uPointLightingLocation);
+			  
+			  // map to [0;1] range by dividing by far_plane
+			  lightDistance = lightDistance / uFarPlane;
+			  
+			  // write this as modified depth
+			  fragColor = vec4(lightDistance, 0.0, 0.0, 1.0);
+			  
+			}
+		</script>
+        
+        <script id="vs" type="x-shader/x-vertex">#version 300 es
+ 
+            in vec3 aVertexPosition;
+            in vec3 aVertexNormal;
+            
+            uniform mat4 uMVMatrix;
+            uniform mat4 uPMatrix;
+            uniform mat3 uNMatrix;
+            
+            in  vec2 vTexCoord;
+
+            out vec2 fTexCoord;
+            out vec3 vTransformedNormal;
+            out vec4 vPosition;
+            
+            void main(void) {
+                vPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
+                gl_Position = uPMatrix * vPosition;
+                fTexCoord = vTexCoord;
+                vTransformedNormal = uNMatrix * aVertexNormal;
+            }
+        </script>
+         
+        <script id="fs" type="x-shader/x-fragment">#version 300 es
+            
+            precision mediump float;
+            
+            in vec2 fTexCoord;
+            in vec3 vTransformedNormal;
+            in vec4 vPosition;
+			in vec4 vVertexRelativeToLight;
+			
+            out vec4 fragColor;
+
+            uniform vec3 uMaterialAmbientColor;
+            uniform vec3 uMaterialDiffuseColor;
+            uniform vec3 uMaterialSpecularColor;
+            uniform float uMaterialShininess;
+            uniform float uFarPlane;
+            
+            uniform vec3 uAmbientColor;
+            
+            uniform vec3 uPointLightingLocation;
+            uniform vec3 uPointLightingSpecularColor;
+            uniform vec3 uPointLightingDiffuseColor;
+            
+            uniform bool uUseLighting;
+            uniform bool uUseMaterial;
+            uniform bool uUseTexture;
+            
+            uniform sampler2D thetexture;
+            uniform samplerCube shadowmap;
+            
+			bool in_shadow(void) {
+				vec3 fragToLight = vPosition.xyz - uPointLightingLocation; 
+				float closestDepth = texture(shadowmap, fragToLight).x;
+				closestDepth *= uFarPlane;
+				float currentDepth = length(fragToLight);
+				// now test for shadows
+				float bias = 0.3; 
+				return (currentDepth -  bias > closestDepth);
+			}
+
+            void main(void) {
+				
+                vec3 materialAmbientColor = vec3(1.0, 1.0, 1.0);
+                vec3 materialDiffuseColor = vec3(1.0, 1.0, 1.0);
+                vec3 materialSpecularColor = vec3(1.0, 1.0, 1.0);
+                if(uUseMaterial) {
+					materialAmbientColor = uMaterialAmbientColor;
+					materialDiffuseColor = uMaterialDiffuseColor;
+					materialSpecularColor = uMaterialSpecularColor;
+				}
+                
+                float alpha = 1.0;
+                
+                if(uUseTexture) {
+					vec4 textureColor = texture(thetexture, vec2(fTexCoord.s, fTexCoord.t));
+					materialAmbientColor = materialAmbientColor * textureColor.rgb;
+					materialDiffuseColor = materialDiffuseColor * textureColor.rgb;
+					alpha = textureColor.a;
+				}
+                
+                vec3 ambientLightWeighting = uAmbientColor;
+                
+                
+                if(uUseLighting) {
+					
+					vec3 lightDirection = normalize(uPointLightingLocation - vPosition.xyz);
+					vec3 normal = normalize(vTransformedNormal);
+					
+					vec3 specularLightWeighting = vec3(0.0, 0.0, 0.0);
+					vec3 eyeDirection = normalize(-vPosition.xyz);
+					vec3 reflectionDirection = reflect(-lightDirection, normal);
+					
+					float specularLightBrightness = pow(max(dot(reflectionDirection, eyeDirection), 0.0), uMaterialShininess);
+					specularLightWeighting = uPointLightingSpecularColor * specularLightBrightness;
+					
+					float diffuseLightBrightness = max(dot(normal, lightDirection), 0.0);
+					vec3 diffuseLightWeighting = uPointLightingDiffuseColor * diffuseLightBrightness;
+					
+					if(in_shadow()) {
+						diffuseLightWeighting = vec3(0.0, 0.0, 0.0);
+						specularLightWeighting = vec3(0.0, 0.0, 0.0);
+					}
+					
+					fragColor = vec4(materialAmbientColor * ambientLightWeighting
+					  + materialDiffuseColor * diffuseLightWeighting
+					  + materialSpecularColor * specularLightWeighting,
+					  alpha);
+				} else {
+					fragColor = vec4(materialAmbientColor  * ambientLightWeighting, alpha);
+				}
+				
+            }
+        </script>
+  
+        <script type="text/javascript" src="js/hirarki.js"></script>
+
+        <link rel="stylesheet" href="css/bootstrap.min.css">
+        <link rel="stylesheet" href="css/w3.css">
+        <link rel="stylesheet" href="css/ws2.css">
+        
+        <script src="js/jquery.min.js"></script>
+        <script src="js/bootstrap.min.js"></script>
+
+    </head>
+
+    <body onload="webGLStart();" class="w3-black">
+
+        <span style="font-size:30px;cursor:pointer" onclick="openNav()">&#9776; Menu</span>
+        <div id="mySidenav" class="sidenav">
+          <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">&times;</a>
+
+          <input type="checkbox" id="animation" checked /> Use animation<br/>
+          <input type="checkbox" id="lighting" checked /> Use lighting<br/>
+          <input type="checkbox" id="texture" checked /> Use texture<br/>
+          <div>
+            Camera Zoom<br />
+            <input type="range" min="10" max="100" value="45" class="slider" id="cameraZoom">
+        </div>
+          <div class="input-light">
+                <h2>Point light</h2>
+                <div>
+                    X<br />
+                    <input type="range" min="-100" max="100" value="0" class="slider" id="lightPositionX">
+                </div>
+                <div>
+                    Y<br />
+                    <input type="range" min="-50" max="50" value="0" class="slider" id="lightPositionY">
+                </div>
+                <div>
+                    Z<br />
+                    <input type="range" min="-300" max="-100" value="-200" class="slider" id="lightPositionZ">
+                </div>
+                <div>
+                    R: <br/>  <input type="text" id="pointR" value="0.5" />
+                </div>
+                <div>
+                    G: <br/>  <input type="text" id="pointG" value="0.5" />
+                </div>
+                <div>
+                    B:  <br/> <input type="text" id="pointB" value="0.5" />
+                </div>
+            </div>
+            <div class="input-light">
+                <h2>Ambient light</h2>
+                <div>
+                    R: <br/>  <input type="text" id="ambientR" value="0.2" />
+                </div>
+                <div>
+                    G:  <br/> <input type="text" id="ambientG" value="0.2" />
+                </div>
+                <div>
+                    B:  <br/> <input type="text" id="ambientB" value="0.2" />
+                </div>
+            </div>
+            <div>
+               <h2>Room Material</h2>
+               <div>
+                    <select class="form-control form-control-sm" id="room-material">
+                      <option value="none">None</option>
+                      <option value="brass">Brass</option>
+                      <option value="chrome">Chrome</option>
+                      <option value="bronze">Bronze</option>
+                    </select>
+                </div>
+                <h2>Door Material</h2>
+                <div>
+                     <select class="form-control form-control-sm" id="door-material">
+                       <option value="none">None</option>
+                       <option value="brass">Brass</option>
+                       <option value="chrome">Chrome</option>
+                       <option value="bronze">Bronze</option>
+                     </select>
+                 </div>
+                 <h2>Octopus Material</h2>
+                <div>
+                     <select class="form-control form-control-sm" id="octopus-material">
+                       <option value="none">None</option>
+                       <option value="brass">Brass</option>
+                       <option value="chrome">Chrome</option>
+                       <option value="bronze">Bronze</option>
+                     </select>
+                 </div>
+                 <h2>Cat Material</h2>
+                <div>
+                     <select class="form-control form-control-sm" id="cat-material">
+                       <option value="none">None</option>
+                       <option value="brass">Brass</option>
+                       <option value="chrome">Chrome</option>
+                       <option value="bronze">Bronze</option>
+                     </select>
+                 </div>
+                 <h2>Car Material</h2>
+                 <div>
+                    <select class="form-control form-control-sm" id="car-material">
+                      <option value="none">None</option>
+                      <option value="brass">Brass</option>
+                      <option value="chrome">Chrome</option>
+                      <option value="bronze">Bronze</option>
+                    </select>
+                </div>
+                <h2>Human Material</h2>
+                <div>
+                   <select class="form-control form-control-sm" id="human-material">
+                     <option value="none">None</option>
+                     <option value="brass">Brass</option>
+                     <option value="chrome">Chrome</option>
+                     <option value="bronze">Bronze</option>
+                   </select>
+               </div>
+            </div>
+
+          <!-- Avatar image in top left corner -->
+            <h2>Door</h2>
+            <div>    
+                Door Rotation <br />
+                <input type="range" min="0" max="360" value="0" class="slider" id="baseDoorRotationSlider" disabled>
+            </div>
+            <div>
+                Door Inside Rotation<br />
+                <input type="range" min="-60" max="0" value="0" class="slider" id="doorInsideRotationSlider" disabled>
+            </div>
+            <div>
+                Door Handle Rotation<br />
+                <input type="range" min="-45" max="0" value="0" class="slider" id="doorHandleRotationSlider" disabled>
+            </div>
+
+            <h2>Octopus</h2>
+            <div>    
+                Octopus Rotation <br />
+                <input type="range" min="0" max="360" value="0" class="slider" id="baseOctopusRotationSlider" disabled>
+            </div>
+            <div>
+                First Octopus Leg Rotation<br />
+                <input type="range" min="0" max="90" value="0" class="slider" id="firstOctopusLegRotationSlider" disabled>
+            </div>
+            <div>
+                First Octopus Lower length Rotation<br />
+                <input type="range" min="-90" max="0" value="0" class="slider" id="firstOctopusLowerLegRotationSlider" disabled>
+            </div>
+            <div>
+                Second Octopus Leg Rotation<br />
+                <input type="range" min="0" max="90" value="0" class="slider" id="secondOctopusLegRotationSlider" disabled>
+            </div>
+            <div>
+                Second Octopus Lower length Rotation<br />
+                <input type="range" min="-90" max="0" value="0" class="slider" id="secondOctopusLowerLegRotationSlider" disabled>
+            </div>
+            <div>
+                Third Octopus Leg Rotation<br />
+                <input type="range" min="0" max="90" value="0" class="slider" id="thirdOctopusLegRotationSlider" disabled>
+            </div>
+            <div>
+                Third Octopus Lower length Rotation<br />
+                <input type="range" min="-90" max="0" value="0" class="slider" id="thirdOctopusLowerLegRotationSlider" disabled>
+            </div>
+            <div>
+                Fourth Octopus Leg Rotation<br />
+                <input type="range" min="0" max="90" value="0" class="slider" id="fourthOctopusLegRotationSlider" disabled>
+            </div>
+            <div>
+                Fourth Octopus Lower length Rotation<br />
+                <input type="range" min="-90" max="0" value="0" class="slider" id="fourthOctopusLowerLegRotationSlider" disabled>
+            </div>
+
+            <h2>Cat</h2>
+            <div>    
+                Cat Rotation <br />
+                <input type="range" min="0" max="360" value="0" class="slider" id="baseCatRotationSlider" disabled>
+            </div>
+            <div>
+                Cat Head Rotation<br />
+                <input type="range" min="-15" max="15" value="0" class="slider" id="catHeadRotationSlider" disabled>
+            </div>
+
+            <h2>Car</h2>
+            <div>    
+                Car Rotation <br />
+                <input type="range" min="0" max="360" value="0" class="slider" id="baseCarRotationSlider" disabled>
+            </div>
+
+            <h2>Human</h2>
+            <div>    
+                Human Rotation <br />
+                <input type="range" min="0" max="360" value="0" class="slider" id="baseHumanRotationSlider" disabled>
+            </div>
+        </div>
+        <div>
+            <canvas id="canvas" style="border: none;" width="1024" height="768"></canvas>
+        </div>
+    </body>
+</html>
